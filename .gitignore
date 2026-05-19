@@ -1,1 +1,13 @@
+# Environment
+.env
+
+# Data
+chroma_db/
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Claude auto-context
 .claude/auto-context.md

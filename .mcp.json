@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "harness-memory": {
+      "type": "stdio",
+      "command": "/Users/trungmai/Developer/my-local-harness/venv/bin/python3",
+      "args": [
+        "/Users/trungmai/Developer/my-local-harness/server.py"
+      ]
+    }
+  }
+}
