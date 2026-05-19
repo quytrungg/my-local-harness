@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1920, initial-scale=1.0">
+  <title>Harness Memory Pipeline</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/dracula.css" id="theme">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+    :root {
+      --bg: #1a1b26;
+      --surface: #24253a;
+      --surface2: #2d2e44;
+      --accent: #7aa2f7;
+      --accent2: #bb9af7;
+      --accent3: #9ece6a;
+      --orange: #ff9e64;
+      --red: #f7768e;
+      --text: #c0caf5;
+      --text-dim: #565f89;
+      --text-bright: #e0e4f8;
+      --border: #3b3d5c;
+    }
+
+    .reveal {
+      font-family: 'Inter', -apple-system, sans-serif;
+      color: var(--text);
+      background: var(--bg);
+    }
+
+    .reveal .slides {
+      text-align: left;
+    }
+
+    .reveal h1, .reveal h2, .reveal h3, .reveal h4 {
+      font-family: 'Inter', sans-serif;
+      text-transform: none;
+      letter-spacing: -0.02em;
+      color: var(--text-bright);
+    }
+
+    .reveal h1 { font-size: 3.6em; font-weight: 800; line-height: 1.1; }
+    .reveal h2 { font-size: 2.4em; font-weight: 700; margin-bottom: 0.35em; }
+    .reveal h3 { font-size: 1.5em; font-weight: 600; color: var(--accent); }
+    .reveal h4 { font-size: 1.1em; font-weight: 500; color: var(--text-dim); }
+    .reveal p, .reveal li { font-size: 0.7em; line-height: 1.65; color: var(--text); }
+    .reveal li { margin-bottom: 0.3em; }
+
+    .reveal code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.65em;
+      background: var(--surface2);
+      padding: 0.15em 0.4em;
+      border-radius: 4px;
+      color: var(--accent3);
+    }
+
+    .reveal pre {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.6em 1em;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      width: 100%;
+      margin: 0.5em 0;
+    }
+
+    .reveal pre code {
+      background: transparent;
+      padding: 0;
+      font-size: 0.55em;
+      line-height: 1.5;
+      max-height: none;
+    }
+
+    .reveal .slide-background {
+      background: var(--bg);
+    }
+
+    /* Title slide */
+    .title-slide {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      height: 100%;
+      text-align: center;
+    }
+
+    .title-slide h1 {
+      font-size: 4.2em;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 0.15em;
+    }
+
+    .title-slide .subtitle {
+      font-size: 0.9em;
+      color: var(--text-dim);
+      font-weight: 400;
+      margin-bottom: 0.5em;
+    }
+
+    .title-slide .meta {
+      font-size: 0.5em;
+      color: var(--text-dim);
+    }
+
+    .title-slide .badge-row {
+      display: flex;
+      gap: 14px;
+      margin-top: 0.7em;
+    }
+
+    .title-slide .badge {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 0.3em 1em;
+      font-size: 0.45em;
+      color: var(--text-dim);
+    }
+
+    /* Section divider */
+    .section-slide {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      height: 100%;
+      text-align: center;
+    }
+
+    .section-slide h2 {
+      font-size: 3.4em;
+      margin-bottom: 0.2em;
+    }
+
+    .section-slide .section-number {
+      font-size: 0.6em;
+      color: var(--accent2);
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 0.3em;
+    }
+
+    /* Card grid */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1em;
+      margin-top: 0.5em;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.4em;
+    }
+
+    .card .card-icon {
+      font-size: 1.8em;
+      margin-bottom: 0.2em;
+    }
+
+    .card h4 {
+      font-size: 0.85em;
+      font-weight: 600;
+      color: var(--accent);
+      margin-bottom: 0.3em;
+    }
+
+    .card p, .card li {
+      font-size: 0.5em;
+      line-height: 1.6;
+    }
+
+    .card ul {
+      list-style: none;
+      padding: 0;
+    }
+
+    .card li::before {
+      content: "→ ";
+      color: var(--accent3);
+    }
+
+    /* Flow diagram */
+    .flow-diagram {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4em;
+      margin: 0.6em 0;
+      flex-wrap: wrap;
+    }
+
+    .flow-node {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.6em 1.2em;
+      text-align: center;
+      min-width: 140px;
+    }
+
+    .flow-node .node-label {
+      font-size: 0.5em;
+      font-weight: 600;
+      color: var(--text-bright);
+    }
+
+    .flow-node .node-sub {
+      font-size: 0.35em;
+      color: var(--text-dim);
+      margin-top: 0.15em;
+    }
+
+    .flow-node.highlight {
+      border-color: var(--accent);
+      background: var(--surface2);
+    }
+
+    .flow-node.success { border-color: var(--accent3); }
+    .flow-node.error { border-color: var(--red); }
+    .flow-node.warn { border-color: var(--orange); }
+
+    .flow-arrow {
+      font-size: 0.7em;
+      color: var(--text-dim);
+    }
+
+    /* Two column layout */
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5em;
+      margin-top: 0.3em;
+    }
+
+    .two-col .col {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.2em 1.5em;
+    }
+
+    .two-col .col h4 {
+      font-size: 0.75em;
+      font-weight: 600;
+      margin-bottom: 0.4em;
+    }
+
+    .two-col .col ul {
+      list-style: none;
+      padding: 0;
+    }
+
+    .two-col .col li {
+      font-size: 0.5em;
+      margin-bottom: 0.25em;
+      padding-left: 0.8em;
+      position: relative;
+    }
+
+    .two-col .col li::before {
+      content: "•";
+      position: absolute;
+      left: 0;
+      color: var(--accent);
+    }
+
+    /* Crontab table */
+    .cron-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 0.4em;
+      font-size: 0.6em;
+    }
+
+    .cron-table th {
+      background: var(--surface2);
+      color: var(--accent);
+      font-weight: 600;
+      padding: 0.5em 0.9em;
+      text-align: left;
+      border-bottom: 2px solid var(--border);
+    }
+
+    .cron-table td {
+      padding: 0.5em 0.9em;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .cron-table .schedule {
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--accent3);
+      font-size: 0.9em;
+    }
+
+    .cron-table .script-name {
+      color: var(--orange);
+    }
+
+    /* Filter pipeline */
+    .filter-pipeline {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5em;
+      margin-top: 0.3em;
+    }
+
+    .filter-stage {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.8em;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.8em 1.2em;
+    }
+
+    .filter-stage .stage-num {
+      background: var(--surface2);
+      color: var(--accent2);
+      font-weight: 700;
+      font-size: 0.6em;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .filter-stage .stage-content h4 {
+      font-size: 0.7em;
+      font-weight: 600;
+      margin-bottom: 0.15em;
+    }
+
+    .filter-stage .stage-content p {
+      font-size: 0.48em;
+      color: var(--text-dim);
+      margin: 0;
+    }
+
+    .filter-stage.trash { border-left: 3px solid var(--red); }
+    .filter-stage.research { border-left: 3px solid var(--orange); }
+    .filter-stage.knowledge { border-left: 3px solid var(--accent3); }
+    .filter-stage.neutral { border-left: 3px solid var(--text-dim); }
+
+    /* Stats bar */
+    .stats-row {
+      display: flex;
+      gap: 1em;
+      justify-content: center;
+      margin-top: 0.6em;
+    }
+
+    .stat-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 0.6em 1.4em;
+      text-align: center;
+    }
+
+    .stat-box .stat-value {
+      font-size: 1.8em;
+      font-weight: 700;
+      color: var(--accent);
+    }
+
+    .stat-box .stat-label {
+      font-size: 0.45em;
+      color: var(--text-dim);
+      margin-top: 0.1em;
+    }
+
+    /* YAML block */
+    .yaml-block {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.6em 1em;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.5em;
+      line-height: 1.8;
+      margin: 0.4em 0;
+    }
+
+    .yaml-block .key { color: var(--accent); }
+    .yaml-block .str { color: var(--accent3); }
+    .yaml-block .punct { color: var(--text-dim); }
+
+    /* Architecture diagram */
+    .arch-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5em;
+      margin-top: 0.3em;
+    }
+
+    .arch-layer {
+      display: flex;
+      gap: 0.8em;
+      align-items: center;
+    }
+
+    .arch-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.5em 1em;
+      text-align: center;
+      min-width: 130px;
+    }
+
+    .arch-box .name {
+      font-size: 0.5em;
+      font-weight: 600;
+    }
+
+    .arch-box .desc {
+      font-size: 0.35em;
+      color: var(--text-dim);
+    }
+
+    .arch-box.pillar1 { border-color: var(--accent); }
+    .arch-box.pillar2 { border-color: var(--accent2); }
+    .arch-box.pillar3 { border-color: var(--accent3); }
+
+    /* Column toggles for 4 items */
+    .col-4 {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.6em;
+      margin-top: 0.3em;
+    }
+
+    .col-4 .item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.6em 1em;
+      text-align: center;
+    }
+
+    .col-4 .item .icon { font-size: 1.6em; }
+    .col-4 .item .label { font-size: 0.4em; color: var(--text-dim); margin-top: 0.15em; }
+
+    .reveal .fragment.visible {
+      opacity: 1;
+      visibility: inherit;
+    }
+
+    .reveal .fragment {
+      opacity: 0.3;
+    }
+  </style>
+</head>
+<body>
+<div class="reveal">
+  <div class="slides">
+
+    <!-- ===== TITLE ===== -->
+    <section data-background-color="#1a1b26">
+      <div class="title-slide">
+        <h1>Harness Memory<br>Pipeline</h1>
+        <div class="subtitle">A Local-First RAG System for Engineering Knowledge</div>
+        <div class="badge-row">
+          <span class="badge">Obsidian</span>
+          <span class="badge">ChromaDB</span>
+          <span class="badge">MCP</span>
+          <span class="badge">Ollama</span>
+          <span class="badge">Claude Code</span>
+        </div>
+        <div class="meta">v1.1 &nbsp;·&nbsp; May 2026 &nbsp;·&nbsp; /Users/trungmai/Developer/my-local-harness</div>
+      </div>
+    </section>
+
+    <!-- ===== PROBLEM ===== -->
+    <section data-background-color="#1a1b26">
+      <h2>🧠 The Problem</h2>
+      <div class="two-col">
+        <div class="col">
+          <h4>Before</h4>
+          <ul>
+            <li>Engineering knowledge trapped in Obsidian — invisible during dev sessions</li>
+            <li>Claude Code sessions produce rich work that evaporates after closing</li>
+            <li>No structured way to surface past decisions, gotchas, or project context</li>
+            <li>Weekly sessions follow the same debugging rabbit holes</li>
+          </ul>
+        </div>
+        <div class="col">
+          <h4>After</h4>
+          <ul>
+            <li>Semantic search across all notes — surfaced via MCP inside Claude Code</li>
+            <li>Session summaries auto-written back to Obsidian every week</li>
+            <li>Bidirectional flow: notes → context → work → session notes → indexed</li>
+            <li>Signal-to-noise filtering keeps only what matters</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== SECTION: ARCHITECTURE ===== -->
+    <section data-background-color="#1a1b26" class="section-slide">
+      <div class="section-number">01</div>
+      <h2>System Architecture</h2>
+      <p style="font-size:0.5em; color:var(--text-dim);">Three pipelines forming a closed loop</p>
+    </section>
+
+    <!-- ===== THREE PILLARS ===== -->
+    <section data-background-color="#1a1b26">
+      <h2>Three Pillars</h2>
+      <div class="card-grid">
+        <div class="card">
+          <div class="card-icon">📥</div>
+          <h4 style="color:var(--accent);">Obsidian → ChromaDB</h4>
+          <p><code>ingest.py</code> indexes <code>Projects/</code> and <code>Knowledge/</code> folders into a local ChromaDB vector store using <code>nomic-embed-text</code> via Ollama. Supports incremental and full re-index modes.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">🔌</div>
+          <h4 style="color:var(--accent2);">MCP Integration</h4>
+          <p><code>server.py</code> — a FastMCP server exposing <code>query_notes()</code> and <code>get_project_context()</code> as Claude Code tools. Launched at login via launchd plist.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">🔄</div>
+          <h4 style="color:var(--accent3);">Session → Obsidian</h4>
+          <p><code>sync_sessions.py</code> — weekly cronjob that reads Claude Code session logs, filters through the gatekeeper, and writes aggregated daily notes back to Obsidian.</p>
+        </div>
+      </div>
+
+      <div class="flow-diagram" style="margin-top:0.6em;">
+        <div class="flow-node highlight"><div class="node-label">📝 Obsidian</div><div class="node-sub">Vault</div></div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node"><div class="node-label">🗂️ ChromaDB</div><div class="node-sub">Vector Store</div></div>
+        <span class="flow-arrow">↕</span>
+        <div class="flow-node"><div class="node-label">🔌 MCP Server</div><div class="node-sub">FastMCP</div></div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node highlight"><div class="node-label">🤖 Claude Code</div><div class="node-sub">Dev Sessions</div></div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node"><div class="node-label">🔄 sync_sessions</div><div class="node-sub">Weekly cron</div></div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node highlight"><div class="node-label">📝 Obsidian</div><div class="node-sub">Logs/</div></div>
+      </div>
+    </section>
+
+    <!-- ===== SECTION: INGEST ===== -->
+    <section data-background-color="#1a1b26" class="section-slide">
+      <div class="section-number">02</div>
+      <h2>Vector Infrastructure</h2>
+      <p style="font-size:0.5em; color:var(--text-dim);"><code>ingest.py</code> — Obsidian → ChromaDB</p>
+    </section>
+
+    <!-- ===== INGEST DETAILS ===== -->
+    <section data-background-color="#1a1b26">
+      <h2>Ingest Pipeline</h2>
+      <div class="two-col">
+        <div class="col">
+          <h4>Configuration</h4>
+          <ul>
+            <li>Embedding model: <code>nomic-embed-text</code> (Ollama)</li>
+            <li>Chunk size: 1,000 chars, overlap: 100</li>
+            <li>Collection: <code>obsidian_notes</code>, HNSW cosine</li>
+            <li>Batch size: 50 chunks per upsert</li>
+            <li>Parser: LangChain <code>ObsidianLoader</code></li>
+          </ul>
+        </div>
+        <div class="col">
+          <h4>Modes</h4>
+          <ul>
+            <li><strong>Incremental</strong> (<code>--incremental</code>): skips files unchanged since last run via <code>.last_ingest</code> timestamp</li>
+            <li><strong>Full re-index</strong> (<code>--full</code>): wipes the collection and rebuilds from scratch</li>
+            <li>Metadata: file path + YAML tags attached to every chunk</li>
+            <li>Default <code>outcome=verified_success</code> for MCP filter compatibility</li>
+          </ul>
+        </div>
+      </div>
+      <div class="stats-row">
+        <div class="stat-box"><div class="stat-value">1000</div><div class="stat-label">Chunk Size (chars)</div></div>
+        <div class="stat-box"><div class="stat-value">100</div><div class="stat-label">Overlap (chars)</div></div>
+        <div class="stat-box"><div class="stat-value">50</div><div class="stat-label">Batch Size</div></div>
+        <div class="stat-box"><div class="stat-value">nomic</div><div class="stat-label">Embed Model</div></div>
+      </div>
+    </section>
+
+    <!-- ===== SECTION: MCP ===== -->
+    <section data-background-color="#1a1b26" class="section-slide">
+      <div class="section-number">03</div>
+      <h2>MCP Integration</h2>
+      <p style="font-size:0.5em; color:var(--text-dim);"><code>server.py</code> — The Harness</p>
+    </section>
+
+    <!-- ===== MCP TOOLS ===== -->
+    <section data-background-color="#1a1b26">
+      <h2>MCP Tools</h2>
+      <div class="two-col">
+        <div class="col">
+          <h4 style="color:var(--accent);">query_notes(query)</h4>
+          <ul>
+            <li>Semantic search on ChromaDB</li>
+            <li>Returns top 5 matching chunks</li>
+            <li>Default filter: <code>outcome = verified_success</code></li>
+            <li>Converts cosine distance to a 0–1 relevance score</li>
+            <li>Results include source path + score</li>
+          </ul>
+        </div>
+        <div class="col">
+          <h4 style="color:var(--accent2);">get_project_context(project)</h4>
+          <ul>
+            <li>Reads <code>Projects/&lt;name&gt;/_Brief.md</code> from vault</li>
+            <li>Case-insensitive project name fallback</li>
+            <li>Lists available projects if not found</li>
+          </ul>
+        </div>
+      </div>
+      <div style="margin-top:0.4em;">
+        <p style="font-size:0.38em; color:var(--text-dim);">
+          🚀 Server runs via FastMCP (Python), registered in <code>~/.claude/settings.json</code>,<br>
+          launched at macOS login via a <strong>launchd plist</strong> — persistent daemon.
+        </p>
+      </div>
+    </section>
+
+    <!-- ===== SECTION: GATEKEEPER ===== -->
+    <section data-background-color="#1a1b26" class="section-slide">
+      <div class="section-number">04</div>
+      <h2>Session Sync Pipeline</h2>
+      <p style="font-size:0.5em; color:var(--text-dim);"><code>sync_sessions.py</code> — Closing the Loop</p>
+    </section>
+
+    <!-- ===== GATEKEEPER OVERVIEW ===== -->
+    <section data-background-color="#1a1b26">
+      <h2>The Gatekeeper</h2>
+      <p style="font-size:0.4em; color:var(--text-dim); margin-bottom:0.3em;">Every session passes through a 3-stage filter before becoming knowledge</p>
+
+      <div class="filter-pipeline">
+
+        <div class="filter-stage neutral fragment">
+          <div class="stage-num">1</div>
+          <div class="stage-content">
+            <h4>Heuristic Filter — Structural Check</h4>
+            <p>No tool calls → <strong style="color:var(--red);">TRASH</strong> &nbsp;·&nbsp; Same Bash command repeated &gt;10x consecutively → <strong style="color:var(--red);">TRASH</strong> &nbsp;·&nbsp; No git diff changes → <strong style="color:var(--orange);">RESEARCH</strong></p>
+          </div>
+        </div>
+
+        <div class="filter-stage neutral fragment">
+          <div class="stage-num">2</div>
+          <div class="stage-content">
+            <h4>Outcome Signal — Success Verification</h4>
+            <p>Non-zero exit code on final hook → flag as failure &nbsp;·&nbsp; Last user message contains positive keywords (<code>that worked</code>, <code>thanks</code>, <code>done</code>, <code>merged</code>) → boost to KNOWLEDGE</p>
+          </div>
+        </div>
+
+        <div class="filter-stage neutral fragment">
+          <div class="stage-num">3</div>
+          <div class="stage-content">
+            <h4>LLM Classifier — Semantic Check (llama3:8b)</h4>
+            <p>Sends final 20% of transcript to <code>llama3:8b</code> via Ollama. Bug fixes, architectural decisions, non-obvious findings → <strong style="color:var(--accent3);">KNOWLEDGE</strong>. Failure, confusion, trivial chat → <strong style="color:var(--red);">TRASH</strong>.</p>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="flow-diagram" style="margin-top:0.5em;">
+        <div class="flow-node"><div class="node-label">📄 Session</div></div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node warn"><div class="node-label">🔍 Filter</div><div class="node-sub">Stage 1</div></div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node"><div class="node-label">📊 Signal</div><div class="node-sub">Stage 2</div></div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node highlight"><div class="node-label">🤖 LLM</div><div class="node-sub">Stage 3</div></div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node success"><div class="node-label">📝 Knowledge</div></div>
+      </div>
+    </section>
+
+    <!-- ===== FILTER DECISIONS ===== -->
+    <section data-background-color="#1a1b26">
+      <h2>Routing Decisions</h2>
+
+      <table class="cron-table">
+        <thead>
+          <tr><th>Classification</th><th>Destination</th><th>ChromaDB</th><th>Retention</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong style="color:var(--accent3);">KNOWLEDGE</strong></td>
+            <td><code>Logs/YYYY-MM-DD.md</code></td>
+            <td>✅ Indexed — high priority</td>
+            <td>Permanent</td>
+          </tr>
+          <tr>
+            <td><strong style="color:var(--orange);">RESEARCH</strong></td>
+            <td><code>System/Staging/</code></td>
+            <td>⏸️ Skipped for now</td>
+            <td>14-day pruning (future)</td>
+          </tr>
+          <tr>
+            <td><strong style="color:var(--red);">TRASH</strong></td>
+            <td><code>~/.claude/archive/</code></td>
+            <td>❌ Not indexed</td>
+            <td>Archived, not deleted</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="arch-container" style="margin-top:0.3em;">
+        <div class="arch-layer">
+          <div class="arch-box pillar3"><div class="name">KNOWLEDGE</div><div class="desc">57% estimated</div></div>
+          <div class="arch-box" style="border-color:var(--orange);"><div class="name">RESEARCH</div><div class="desc">26% estimated</div></div>
+          <div class="arch-box" style="border-color:var(--red);"><div class="name">TRASH</div><div class="desc">17% estimated</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== OUTPUT FORMAT ===== -->
+    <section data-background-color="#1a1b26">
+      <h2>Obsidian Note Format</h2>
+      <p style="font-size:0.4em; color:var(--text-dim);">One note per calendar day — aggregated across all repos and sessions</p>
+
+      <div class="yaml-block">
+        <span class="punct">---</span><br>
+        <span class="key">session_ids</span><span class="punct">:</span> <span class="str">["abc-123", "def-456"]</span><br>
+        <span class="key">date</span><span class="punct">:</span> <span class="str">"2026-05-16"</span><br>
+        <span class="key">outcome</span><span class="punct">:</span> <span class="str">"verified_success"</span><br>
+        <span class="key">repos</span><span class="punct">:</span> <span class="str">[employment-hero, rostering-api-service]</span><br>
+        <span class="key">tags</span><span class="punct">:</span> <span class="str">[auto-logged]</span><br>
+        <span class="punct">---</span>
+      </div>
+
+      <div class="two-col" style="margin-top:0.2em;">
+        <div class="col">
+          <h4>Summarization Prompt</h4>
+          <ul>
+            <li>What was worked on — repo, ticket, brief description</li>
+            <li>Technical decisions — non-obvious choices + reasoning</li>
+            <li>Gotchas / surprises — bugs discovered, edge cases</li>
+            <li>Commands / patterns — key bash, code patterns</li>
+            <li>Pending tasks — unresolved items</li>
+          </ul>
+        </div>
+        <div class="col">
+          <h4>Key Design Decisions</h4>
+          <ul>
+            <li><code>utility_score</code> NOT stored — computed at query time as BM25</li>
+            <li>Same-day files append rather than overwrite</li>
+            <li>Transcript truncated to ~8,000 chars for LLM context</li>
+            <li>Output uses [[wikilinks]] for cross-referencing</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== SECTION: SCHEDULE ===== -->
+    <section data-background-color="#1a1b26" class="section-slide">
+      <div class="section-number">05</div>
+      <h2>Automation Schedule</h2>
+      <p style="font-size:0.5em; color:var(--text-dim);">Three cronjobs keep the loop running</p>
+    </section>
+
+    <!-- ===== CRONTAB ===== -->
+    <section data-background-color="#1a1b26">
+      <h2>Crontab</h2>
+
+      <table class="cron-table">
+        <thead>
+          <tr><th>Time</th><th>Script</th><th>Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="schedule">30 23 * * 6</td>
+            <td class="script-name">sync_sessions.py</td>
+            <td>Saturday 23:30 — Process Claude sessions from last 7 days. Heuristic filter → LLM classify → aggregate daily notes → archive trash</td>
+          </tr>
+          <tr>
+            <td class="schedule">0  0  * * 0</td>
+            <td class="script-name">ingest.py --incremental</td>
+            <td>Sunday 00:00 — After sync finishes. Index only files modified since last run. New session notes get picked up automatically.</td>
+          </tr>
+          <tr>
+            <td class="schedule">0  1  1 * *</td>
+            <td class="script-name">ingest.py --full</td>
+            <td>1st of month 01:00 — Wipe ChromaDB collection and rebuild from scratch. Prevents index drift and stale embeddings.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div style="margin-top:0.6em;">
+        <p style="font-size:0.38em; color:var(--text-dim);">
+          📋 The full re-index runs at 01:00 to avoid racing with the weekly incremental at midnight.<br>
+          Both <code>nomic-embed-text</code> and <code>llama3:8b</code> are already pulled via Ollama.
+        </p>
+      </div>
+    </section>
+
+    <!-- ===== PROJECT STRUCTURE ===== -->
+    <section data-background-color="#1a1b26">
+      <h2>Repo Layout</h2>
+
+      <div class="two-col">
+        <div class="col">
+          <h4>Repository</h4>
+          <ul>
+            <li><code>ingest.py</code> — Obsidian → ChromaDB indexer</li>
+            <li><code>server.py</code> — FastMCP server (query + context tools)</li>
+            <li><code>sync_sessions.py</code> — Session sync pipeline</li>
+            <li><code>chroma_db/</code> — Persistent vector store (gitignored)</li>
+            <li><code>venv/</code> — Python virtual environment</li>
+          </ul>
+        </div>
+        <div class="col">
+          <h4>Obsidian Vault</h4>
+          <ul>
+            <li><code>Projects/</code> — Active engineering notes + <code>_Brief.md</code></li>
+            <li><code>Knowledge/</code> — Evergreen technical notes</li>
+            <li><code>Logs/</code> — Auto-generated daily session notes</li>
+            <li><code>System/Staging/</code> — RESEARCH tier (future)</li>
+            <li><code>Daily/</code> — Manual daily logs (excluded from ingest)</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== SECTION: FUTURE ===== -->
+    <section data-background-color="#1a1b26" class="section-slide">
+      <div class="section-number">06</div>
+      <h2>Future Enhancements</h2>
+      <p style="font-size:0.5em; color:var(--text-dim);">Harness Engineering 2.0</p>
+    </section>
+
+    <!-- ===== FUTURE ===== -->
+    <section data-background-color="#1a1b26">
+      <h2>Roadmap</h2>
+      <div class="col-4">
+        <div class="item fragment">
+          <div class="icon">🔗</div>
+          <div class="label" style="font-size:0.35em; color:var(--accent); margin-top:0.2em;"><strong>Graph-Aware RAG</strong></div>
+          <div class="label">Prioritize chunks from notes with the most Obsidian backlinks for better relevance ranking</div>
+        </div>
+        <div class="item fragment">
+          <div class="icon">🖼️</div>
+          <div class="label" style="font-size:0.35em; color:var(--accent2); margin-top:0.2em;"><strong>Image Support</strong></div>
+          <div class="label">Use llava to describe schematics, architecture diagrams, and screenshots for the vector DB</div>
+        </div>
+        <div class="item fragment">
+          <div class="icon">🏷️</div>
+          <div class="label" style="font-size:0.35em; color:var(--accent3); margin-top:0.2em;"><strong>Auto-Tagging</strong></div>
+          <div class="label">Cronjob applies #completed / #todo tags to Obsidian notes based on session outcome classification</div>
+        </div>
+        <div class="item fragment">
+          <div class="icon">🧹</div>
+          <div class="label" style="font-size:0.35em; color:var(--orange); margin-top:0.2em;"><strong>14-day RESEARCH Pruning</strong></div>
+          <div class="label">Secondary crontab deletes stale System/Staging/ notes older than 14 days</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== CLOSING ===== -->
+    <section data-background-color="#1a1b26">
+      <div class="title-slide">
+        <h2 style="font-size:2.8em;">Thank You</h2>
+        <div class="subtitle" style="font-size:0.65em; margin-top:0.4em;">The Harness Memory Pipeline — v1.1</div>
+        <div class="badge-row" style="margin-top:0.5em;">
+          <span class="badge">ingest.py</span>
+          <span class="badge">server.py</span>
+          <span class="badge">sync_sessions.py</span>
+        </div>
+        <div style="margin-top:0.6em; font-size:0.45em; color:var(--text-dim);">
+          <code>/Users/trungmai/Developer/my-local-harness</code>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+<script>
+  Reveal.initialize({
+    width: 1920,
+    height: 1080,
+    margin: 0.06,
+    minScale: 0.2,
+    maxScale: 1.5,
+    transition: 'fade',
+    transitionSpeed: 'fast',
+    controls: true,
+    controlsLayout: 'bottom-right',
+    progress: true,
+    hash: true,
+    keyboard: true,
+    overview: true,
+    center: false,
+    touch: true,
+    fragments: true,
+    fragmentInURL: false,
+    shuffle: false,
+    autoSlide: 0,
+    autoSlideStoppable: true,
+  });
+</script>
+</body>
+</html>
