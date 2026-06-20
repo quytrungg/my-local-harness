@@ -121,4 +121,10 @@ def get_project_context(project_name: str) -> str:
 
 
 if __name__ == "__main__":
-    mcp.run()
+    import sys
+    transport = sys.argv[1] if len(sys.argv) > 1 else "stdio"
+    port = int(sys.argv[2]) if len(sys.argv) > 2 else 8123
+    kwargs = {}
+    if transport == "sse":
+        kwargs["port"] = port
+    mcp.run(transport=transport, **kwargs)

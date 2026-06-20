@@ -1,7 +1,27 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "Bash(ollama list *)",
+      "Bash(pyenv versions *)",
+      "Bash(pyenv which *)",
+      "Bash(/Users/trungmai/.pyenv/versions/3.14.4/bin/python3 *)",
+      "Bash(venv/bin/pip install *)",
+      "Bash(venv/bin/pip show *)",
+      "Bash(venv/bin/python3 *)",
+      "Bash(launchctl load *)",
+      "Bash(launchctl list *)",
+      "Bash(crontab -l)",
+      "Bash(crontab -)",
+      "mcp__harness-memory__get_project_context",
+      "mcp__harness-memory__query_notes",
+      "Bash(echo \"exit:$?\")",
+      "Bash(cat)",
+      "Bash(crontab /tmp/harness_crontab)"
     ]
-  }
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "harness-memory"
+  ]
 }

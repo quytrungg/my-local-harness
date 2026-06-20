@@ -43,7 +43,7 @@ _PROJECT_DIR = _env.get("HARNESS_PROJECT_DIR", str(Path(__file__).parent))
 
 
 VAULT_PATH = Path(_env.get("OBSIDIAN_VAULT_PATH", str(Path.home() / "Trung's Brain")))
-INGEST_DIRS = [s.strip() for s in _env.get("INGEST_DIRS", "Projects,Knowledge").split(",")]
+INGEST_DIRS = [s.strip() for s in _env.get("INGEST_DIRS", "Projects,Knowledge,Prompts").split(",")]
 CHROMA_PATH = Path(_env.get("CHROMA_DB_DIR", str(Path(__file__).parent / "chroma_db")))
 if not CHROMA_PATH.is_absolute():
     CHROMA_PATH = Path(_PROJECT_DIR) / CHROMA_PATH
