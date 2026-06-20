@@ -46,6 +46,8 @@ CODEX_SESSIONS = Path(_env.get("CODEX_SESSIONS_DIR", str(Path.home() / ".codex" 
 VAULT_ROOT = Path(_env.get("OBSIDIAN_VAULT_PATH", str(Path.home() / "Trung's Brain")))
 VAULT_LOGS = Path(_env.get("OBSIDIAN_LOGS_DIR", str(VAULT_ROOT / "Logs")))
 VAULT_KNOWLEDGE = Path(_env.get("OBSIDIAN_KNOWLEDGE_DIR", str(VAULT_ROOT / "Knowledge")))
+VAULT_PROMPTS = Path(_env.get("OBSIDIAN_PROMPTS_DIR", str(VAULT_ROOT / "Prompts")))
+VAULT_PROJECTS = Path(_env.get("OBSIDIAN_PROJECTS_DIR", str(VAULT_ROOT / "Projects")))
 CLAUDE_ARCHIVE_DIR = Path(_env.get("CLAUDE_ARCHIVE_DIR", str(Path.home() / ".claude" / "archive")))
 CODEX_ARCHIVE_DIR = Path(_env.get("CODEX_ARCHIVE_DIR", str(Path.home() / ".codex" / "archived_sessions")))
 LOOKBACK_DAYS = int(_env.get("LOOKBACK_DAYS", "7"))
@@ -57,12 +59,14 @@ SHELL_TOOL_NAMES = {"bash", "exec_command", "shell"}
 COMMAND_KEYS = ("command", "cmd")
 RELATED_NOTE_DIRS = [
     s.strip()
-    for s in _env.get("RELATED_NOTE_DIRS", _env.get("INGEST_DIRS", "Projects,Knowledge,Prompts")).split(",")
+    for s in _env.get("RELATED_NOTE_DIRS", "Projects,Knowledge,Prompts").split(",")
     if s.strip()
 ]
 RELATED_NOTE_LIMIT = int(_env.get("RELATED_NOTE_LIMIT", "5"))
 RELATED_NOTE_MIN_SCORE = int(_env.get("RELATED_NOTE_MIN_SCORE", "8"))
-GENERATED_NOTE_PREFIXES = ("Research Sessions - ",)
+PROMPT_MESSAGE_MIN_SCORE = int(_env.get("PROMPT_MESSAGE_MIN_SCORE", "6"))
+PROMPT_SESSION_MIN_SCORE = int(_env.get("PROMPT_SESSION_MIN_SCORE", "8"))
+GENERATED_NOTE_PREFIXES = ("Research Sessions - ", "Session Notes - ", "Prompt Patterns - ")
 TOKEN_STOPWORDS = {
     "about", "after", "agent", "also", "assistant", "because", "before", "being",
     "brief", "called", "check", "code", "codex", "command", "commands", "could",
@@ -73,6 +77,23 @@ TOKEN_STOPWORDS = {
     "tool", "tools", "unknown", "updated", "used", "user", "using", "with",
     "worked", "would", "write",
 }
+
+PROMPT_ACTION_WORDS = {
+    "analyze", "check", "compare", "debug", "design", "diagnose", "explain",
+    "find", "fix", "investigate", "plan", "review", "summarize", "trace",
+    "validate", "verify",
+}
+PROMPT_FEEDBACK_PHRASES = (
+    "actually", "but", "don't", "instead", "not ", "please investigate more",
+    "please re-check", "rather than", "that's not", "try", "you missed",
+)
+PROMPT_CONTEXT_PATTERNS = (
+    r"`[^`]+`",
+    r"\b[A-Z]{2,10}-\d+\b",
+    r"\b\w+/\w+[/\w.-]*\b",
+    r"\b\w+\.(rb|py|ts|tsx|js|jsx|md|json|yml|yaml|sql)\b",
+    r"\b(error|exception|failed|failing|stack trace|payload|request|response|log|query|sql)\b",
+)
 
 SESSION_SOURCES = {
     "claude": {
@@ -101,6 +122,26 @@ Extract and format as Markdown:
 
 Be concise. Omit small talk, filler, raw session IDs, and session inventories.
 Related [[wikilinks]] are added separately by the pipeline."""
+
+PROMPT_PATTERNS_PROMPT = """You are distilling durable AI prompting patterns from engineering sessions.
+
+Extract and format as Markdown:
+1. **Effective prompting patterns** — the reusable user prompt shapes that led to good investigation or feedback
+2. **Why they worked** — what context, constraints, evidence, or correction made them effective
+3. **Reusable templates** — short prompt templates someone can adapt later
+4. **Feedback moves** — useful ways the user corrected, redirected, or narrowed the agent
+
+Do not include raw session IDs or session inventories. Prefer concise examples over long verbatim pasted prompts."""
+
+PROJECT_NOTE_PROMPT = """You are summarizing engineering session material into a project-specific Obsidian note.
+
+Extract and format as Markdown:
+1. **Project context** — what part of this repo/system was explored
+2. **Durable findings** — facts, implementation details, constraints, or behavior worth remembering for this project
+3. **Patterns / commands** — commands, code paths, queries, or workflows likely to be reused
+4. **Open threads** — follow-up work or unresolved questions
+
+Keep the note project-specific. Omit raw session IDs, generic process chatter, and session inventories."""
 
 
 def find_recent_sessions(lookback_days: int) -> list[tuple[str, Path]]:
@@ -461,6 +502,108 @@ def session_transcript_lines(session: dict) -> list[str]:
     return lines
 
 
+def session_repo(session: dict) -> str:
+    return Path(session["cwd"]).name if session.get("cwd") else "unknown"
+
+
+def truncate_text(text: str, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+    half = max_chars // 2
+    return text[:half].rstrip() + "\n...[truncated]...\n" + text[-half:].lstrip()
+
+
+def format_sessions_for_llm(sessions: list[dict], max_chars: int = 8000) -> str:
+    combined = []
+    for session in sessions:
+        source = session.get("source", "unknown")
+        repo = session_repo(session)
+        combined.append(
+            f"=== Source: {source}; Repo: {repo} ===\n"
+            + "\n".join(session_transcript_lines(session))
+        )
+    return truncate_text("\n\n".join(combined), max_chars)
+
+
+def llm_generate(system_prompt: str, user_content: str) -> str:
+    try:
+        response = ollama.chat(
+            model=CLASSIFY_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ],
+        )
+        return response.message.content.strip()
+    except Exception as e:
+        return f"[Summarization failed: {e}]"
+
+
+def prompt_context_hits(text: str) -> int:
+    lower = text.lower()
+    return sum(1 for pattern in PROMPT_CONTEXT_PATTERNS if re.search(pattern, lower))
+
+
+def prompt_message_score(text: str) -> int:
+    stripped = text.strip()
+    lower = stripped.lower()
+    if len(stripped) < 25:
+        return 0
+
+    score = 0
+    if len(stripped) >= 120:
+        score += 1
+    if "?" in stripped:
+        score += 1
+    if any(word in lower for word in PROMPT_ACTION_WORDS):
+        score += 2
+    if any(phrase in lower for phrase in PROMPT_FEEDBACK_PHRASES):
+        score += 3
+    score += min(prompt_context_hits(stripped), 4) * 2
+    if stripped.count("\n") >= 2:
+        score += 1
+    if re.search(r"\b(start from|look at|focus on|rather than|because|given|based on)\b", lower):
+        score += 1
+    return score
+
+
+def scored_prompt_messages(session: dict) -> list[tuple[int, str]]:
+    scored = [
+        (prompt_message_score(message), message.strip())
+        for message in session.get("user_messages", [])
+        if message.strip()
+    ]
+    return [
+        (score, message)
+        for score, message in sorted(scored, key=lambda item: -item[0])
+        if score >= PROMPT_MESSAGE_MIN_SCORE
+    ]
+
+
+def prompt_session_score(session: dict) -> int:
+    scored = scored_prompt_messages(session)
+    return sum(score for score, _message in scored)
+
+
+def is_prompt_worthy(session: dict) -> bool:
+    return prompt_session_score(session) >= PROMPT_SESSION_MIN_SCORE
+
+
+def format_prompt_patterns_input(sessions: list[dict], max_chars: int = 8000) -> str:
+    entries = []
+    for session in sessions:
+        scored = scored_prompt_messages(session)
+        if not scored:
+            continue
+        repo = session_repo(session)
+        source = session.get("source", "unknown")
+        prompt_blocks = []
+        for score, message in scored[:3]:
+            prompt_blocks.append(f"Score: {score}\nUser prompt:\n{truncate_text(message, 1200)}")
+        entries.append(f"=== Source: {source}; Repo: {repo} ===\n" + "\n\n".join(prompt_blocks))
+    return truncate_text("\n\n".join(entries), max_chars)
+
+
 def text_tokens(text: str) -> set[str]:
     tokens = set()
     for token in re.findall(r"[A-Za-z][A-Za-z0-9_-]{2,}", text.lower()):
@@ -476,8 +619,8 @@ def text_tokens(text: str) -> set[str]:
 def session_match_text(sessions: list[dict]) -> str:
     parts = []
     for session in sessions:
-        if session["cwd"]:
-            parts.append(Path(session["cwd"]).name)
+        if session.get("cwd"):
+            parts.append(session_repo(session))
         parts.extend(session_transcript_lines(session))
     return "\n".join(parts)
 
@@ -558,31 +701,7 @@ def append_related_to_existing_note(note_path: Path, sessions: list[dict]) -> bo
 
 def llm_summarize(sessions: list[dict]) -> str:
     """Summarize a list of sessions into a single Obsidian note body."""
-    combined = []
-    for s in sessions:
-        repo = Path(s["cwd"]).name if s["cwd"] else "unknown"
-        source = s.get("source", "unknown")
-        combined.append(
-            f"=== Source: {source}; Repo: {repo} ===\n"
-            + "\n".join(session_transcript_lines(s))
-        )
-
-    transcript = "\n\n".join(combined)
-    # Trim to ~8000 chars to stay within context
-    if len(transcript) > 8000:
-        transcript = transcript[:4000] + "\n...[truncated]...\n" + transcript[-4000:]
-
-    try:
-        response = ollama.chat(
-            model=CLASSIFY_MODEL,
-            messages=[
-                {"role": "system", "content": SUMMARIZE_PROMPT},
-                {"role": "user", "content": transcript},
-            ],
-        )
-        return response.message.content.strip()
-    except Exception as e:
-        return f"[Summarization failed: {e}]"
+    return llm_generate(SUMMARIZE_PROMPT, format_sessions_for_llm(sessions))
 
 
 def session_date(session: dict) -> str:
@@ -664,6 +783,76 @@ def write_research_note(date: str, sessions: list[dict]) -> None:
     print(f"  Written: {note_path}")
 
 
+def write_prompt_note(date: str, sessions: list[dict]) -> None:
+    prompt_input = format_prompt_patterns_input(sessions)
+    if not prompt_input:
+        return
+
+    repos = sorted({session_repo(s) for s in sessions if session_repo(s) != "unknown"})
+    sources = sorted({s.get("source", "unknown") for s in sessions})
+    prompt_count = sum(len(scored_prompt_messages(s)) for s in sessions)
+    note_path = VAULT_PROMPTS / f"Prompt Patterns - {date}.md"
+
+    print(f"  Summarizing {prompt_count} prompt pattern(s) for {date}...")
+    body = append_related_section(
+        llm_generate(PROMPT_PATTERNS_PROMPT, prompt_input),
+        sessions,
+        note_path,
+    )
+
+    front_matter = (
+        "---\n"
+        f'date: "{date}"\n'
+        f'outcome: "prompt_patterns"\n'
+        f'prompt_count: {prompt_count}\n'
+        f'repos: {json.dumps(repos)}\n'
+        f'sources: {json.dumps(sources)}\n'
+        f'tags: [auto-logged, prompts]\n'
+        "---\n\n"
+    )
+
+    note_path.write_text(front_matter + f"# Prompt Patterns - {date}\n\n" + body)
+    print(f"  Written: {note_path}")
+
+
+def project_dir_for_session(session: dict) -> Path | None:
+    repo = session_repo(session)
+    if repo == "unknown":
+        return None
+
+    project_dir = VAULT_PROJECTS / repo
+    if project_dir.is_dir():
+        return project_dir
+    return None
+
+
+def write_project_note(date: str, project_dir: Path, sessions: list[dict]) -> None:
+    sources = sorted({s.get("source", "unknown") for s in sessions})
+    repo = project_dir.name
+    note_path = project_dir / f"Session Notes - {date}.md"
+
+    print(f"  Summarizing {len(sessions)} project session(s) for {repo} on {date}...")
+    body = append_related_section(
+        llm_generate(PROJECT_NOTE_PROMPT, format_sessions_for_llm(sessions)),
+        sessions,
+        note_path,
+    )
+
+    front_matter = (
+        "---\n"
+        f'date: "{date}"\n'
+        f'outcome: "project_session_notes"\n'
+        f'session_count: {len(sessions)}\n'
+        f'repo: "{repo}"\n'
+        f'sources: {json.dumps(sources)}\n'
+        f'tags: [auto-logged, project-session]\n'
+        "---\n\n"
+    )
+
+    note_path.write_text(front_matter + f"# Session Notes - {date}\n\n" + body)
+    print(f"  Written: {note_path}")
+
+
 def archive_session(session: dict) -> None:
     archive_dir = session["archive_dir"]
     archive_dir.mkdir(parents=True, exist_ok=True)
@@ -674,6 +863,7 @@ def archive_session(session: dict) -> None:
 def main() -> None:
     VAULT_LOGS.mkdir(parents=True, exist_ok=True)
     VAULT_KNOWLEDGE.mkdir(parents=True, exist_ok=True)
+    VAULT_PROMPTS.mkdir(parents=True, exist_ok=True)
 
     print(f"Scanning Claude/Codex sessions modified in last {LOOKBACK_DAYS} days...")
     paths = find_recent_sessions(LOOKBACK_DAYS)
@@ -685,11 +875,17 @@ def main() -> None:
 
     knowledge_by_date: dict[str, list[dict]] = defaultdict(list)
     research_by_date: dict[str, list[dict]] = defaultdict(list)
+    prompt_by_date: dict[str, list[dict]] = defaultdict(list)
+    project_by_date: dict[tuple[str, Path], list[dict]] = defaultdict(list)
     counts = {"KNOWLEDGE": 0, "RESEARCH": 0, "TRASH": 0}
 
     for source, path in sorted(paths, key=lambda item: (item[0], str(item[1]))):
         print(f"\nProcessing [{source}]: {path.name}")
         session = parse_session(source, path)
+        date = session_date(session)
+
+        if is_prompt_worthy(session):
+            prompt_by_date[date].append(session)
 
         verdict = heuristic_filter(session)
         if verdict == "TRASH":
@@ -699,8 +895,10 @@ def main() -> None:
             continue
         if verdict == "RESEARCH":
             print(f"  → RESEARCH (git delta: no file changes)")
-            date = session_date(session)
             research_by_date[date].append(session)
+            project_dir = project_dir_for_session(session)
+            if project_dir:
+                project_by_date[(date, project_dir)].append(session)
             counts["RESEARCH"] += 1
             continue
 
@@ -715,8 +913,10 @@ def main() -> None:
             counts["TRASH"] += 1
             continue
 
-        date = session_date(session)
         knowledge_by_date[date].append(session)
+        project_dir = project_dir_for_session(session)
+        if project_dir:
+            project_by_date[(date, project_dir)].append(session)
         counts["KNOWLEDGE"] += 1
 
     print(f"\nWriting {len(knowledge_by_date)} daily note(s)...")
@@ -726,6 +926,14 @@ def main() -> None:
     print(f"\nWriting {len(research_by_date)} research note(s) to Knowledge...")
     for date, sessions in sorted(research_by_date.items()):
         write_research_note(date, sessions)
+
+    print(f"\nWriting {len(prompt_by_date)} prompt pattern note(s) to Prompts...")
+    for date, sessions in sorted(prompt_by_date.items()):
+        write_prompt_note(date, sessions)
+
+    print(f"\nWriting {len(project_by_date)} project note(s) to Projects...")
+    for (date, project_dir), sessions in sorted(project_by_date.items(), key=lambda item: (item[0][0], str(item[0][1]))):
+        write_project_note(date, project_dir, sessions)
 
     print(f"\nDone. KNOWLEDGE={counts['KNOWLEDGE']} RESEARCH={counts['RESEARCH']} TRASH={counts['TRASH']}")
 
