@@ -4,6 +4,7 @@ FastMCP server — exposes Obsidian notes to Claude Code via MCP.
 
 Tools:
   query_notes(query)              — semantic search, top 5, verified_success only
+  search_knowledge(query, ...)    — broader second-brain search across vault folders
   get_project_context(project)    — reads Projects/<name>/_Brief.md
 """
 
@@ -43,6 +44,15 @@ if not CHROMA_PATH.is_absolute():
     CHROMA_PATH = Path(_PROJECT_DIR) / CHROMA_PATH
 COLLECTION_NAME = _env.get("COLLECTION_NAME", "obsidian_notes")
 EMBED_MODEL = _env.get("EMBED_MODEL", "nomic-embed-text")
+DEFAULT_KNOWLEDGE_FOLDERS = ("Projects", "Knowledge", "Logs")
+MAX_KNOWLEDGE_RESULTS = 20
+MAX_KNOWLEDGE_CANDIDATES = 100
+
+STOP_WORDS = {
+    "about", "after", "also", "and", "are", "but", "can", "does", "for",
+    "from", "has", "have", "how", "into", "its", "more", "not", "the",
+    "this", "that", "was", "what", "when", "where", "which", "with", "you",
+}
 
 mcp = FastMCP("harness-memory")
 _client: chromadb.PersistentClient | None = None
@@ -79,6 +89,75 @@ def format_results(results: dict) -> str:
     return "\n\n---\n\n".join(parts)
 
 
+def normalize_folders(folders: str | None) -> set[str]:
+    default_folders = {folder.lower() for folder in DEFAULT_KNOWLEDGE_FOLDERS}
+    if not folders:
+        return default_folders
+
+    normalized = set()
+    for raw_folder in folders.split(","):
+        folder = raw_folder.strip().strip("/")
+        if not folder or "/" in folder or "\\" in folder:
+            continue
+        normalized.add(folder.lower())
+
+    return normalized or default_folders
+
+
+def vault_folder_for_path(path: str) -> str:
+    if not path:
+        return ""
+
+    source = Path(path)
+    try:
+        relative = source.resolve().relative_to(VAULT_PATH.resolve())
+        return relative.parts[0] if relative.parts else ""
+    except ValueError:
+        parts = source.parts
+        return parts[0] if parts else ""
+
+
+def query_terms(query: str) -> list[str]:
+    terms = []
+    for term in re.findall(r"[a-zA-Z0-9_][a-zA-Z0-9_.:-]*", query.lower()):
+        if len(term) >= 3 and term not in STOP_WORDS:
+            terms.append(term)
+    return list(dict.fromkeys(terms))
+
+
+def lexical_boost(query: str, terms: list[str], text: str) -> float:
+    haystack = text.lower()
+    boost = 0.0
+
+    phrase = query.strip().lower()
+    if len(phrase) >= 8 and phrase in haystack:
+        boost += 0.12
+
+    if terms:
+        hits = sum(1 for term in terms if term in haystack)
+        boost += 0.12 * (hits / len(terms))
+
+    return boost
+
+
+def format_knowledge_results(results: list[dict]) -> str:
+    if not results:
+        return "No relevant knowledge found in the requested folders."
+
+    parts = []
+    for index, result in enumerate(results, 1):
+        score = round(result["score"], 3)
+        source = result["path"]
+        folder = result["folder"]
+        doc = result["document"]
+        parts.append(
+            f"### Result {index} (score: {score}, folder: {folder})\n"
+            f"Source: {source}\n\n{doc}"
+        )
+
+    return "\n\n---\n\n".join(parts)
+
+
 @mcp.tool()
 def query_notes(query: str) -> str:
     """Search your Obsidian knowledge base for notes relevant to the query."""
@@ -96,6 +175,65 @@ def query_notes(query: str) -> str:
     )
 
     return format_results(results)
+
+
+@mcp.tool()
+def search_knowledge(
+    query: str,
+    folders: str = "Projects,Knowledge,Logs",
+    top_k: int = 8,
+) -> str:
+    """
+    Search specific knowledge across indexed Obsidian folders.
+
+    This is the broad "second brain" lookup. It searches a larger semantic
+    candidate set than query_notes, filters by top-level vault folders, and
+    reranks with exact phrase/term matches so specific concepts are easier to
+    retrieve from Projects, Knowledge, or Logs.
+    """
+    collection = get_collection()
+    collection_count = collection.count()
+
+    if collection_count == 0:
+        return "ChromaDB collection is empty. Run ingest.py first."
+
+    top_k = max(1, min(top_k, MAX_KNOWLEDGE_RESULTS))
+    candidate_count = min(
+        max(top_k * 6, 30),
+        MAX_KNOWLEDGE_CANDIDATES,
+        collection_count,
+    )
+    folder_filter = normalize_folders(folders)
+    terms = query_terms(query)
+    query_embedding = embed(query)
+
+    results = collection.query(
+        query_embeddings=[query_embedding],
+        n_results=candidate_count,
+    )
+
+    docs = results.get("documents", [[]])[0]
+    metas = results.get("metadatas", [[]])[0]
+    distances = results.get("distances", [[]])[0]
+
+    ranked = []
+    for doc, meta, distance in zip(docs, metas, distances):
+        source = meta.get("path", "unknown")
+        folder = vault_folder_for_path(source)
+        if folder.lower() not in folder_filter:
+            continue
+
+        semantic_score = 1 - distance
+        score = semantic_score + lexical_boost(query, terms, f"{source}\n{doc}")
+        ranked.append({
+            "score": score,
+            "folder": folder,
+            "path": source,
+            "document": doc,
+        })
+
+    ranked.sort(key=lambda result: result["score"], reverse=True)
+    return format_knowledge_results(ranked[:top_k])
 
 
 @mcp.tool()

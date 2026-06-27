@@ -37,6 +37,7 @@
    ┌──────────────────────────────┐         │
    │      server.py (FastMCP)     │         │
    │  query_notes(query) → top 5  │         │
+   │  search_knowledge(query)     │         │
    │  get_project_context(name)   │         │
    │  → _Brief.md                 │         │
    └──────────────┬───────────────┘         │
@@ -88,12 +89,18 @@ Every chunk stores file path + YAML tags as metadata. A default `outcome: verifi
 
 ### 2. `server.py` — FastMCP Server
 
-Exposes two tools to Claude Code via the Model Context Protocol:
+Exposes three tools to Claude Code via the Model Context Protocol:
 
 **`query_notes(query: str) -> str`**
 - Semantic search on ChromaDB
 - Returns top 5 matching chunks filtered to `outcome = verified_success`
 - Converts cosine distance to a 0–1 relevance score
+
+**`search_knowledge(query: str, folders: str = "Projects,Knowledge,Logs", top_k: int = 8) -> str`**
+- Broader second-brain search over indexed vault folders
+- Searches a larger semantic candidate set than `query_notes`
+- Filters by top-level folder, defaulting to `Projects/`, `Knowledge/`, and `Logs/`
+- Reranks results with exact phrase and term matches so specific concepts are easier to retrieve
 
 **`get_project_context(project_name: str) -> str`**
 - Reads `Projects/<name>/_Brief.md` from the vault
